@@ -1,0 +1,24 @@
+name: SMMT Catalyst Monitor
+
+on:
+  schedule:
+    # Runs every 30 minutes Monday through Friday
+    - cron: '*/30 10-22 * * 1-5'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  check-catalyst:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Catalyst Scraper
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor_catalyst.py
