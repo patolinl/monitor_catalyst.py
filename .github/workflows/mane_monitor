@@ -1,10 +1,9 @@
-name: MANE EDGAR Monitor
+nname: MANE EDGAR Monitor
 
 on:
   schedule:
-    # Runs Monday through Friday every 30 minutes between 10:00 and 22:00 UTC
     - cron: '*/30 10-22 * * 1-5'
-  workflow_dispatch: # Allows instant manual test runs from GitHub!
+  workflow_dispatch:
 
 jobs:
   check-sec:
