@@ -38,7 +38,6 @@ def check_sec_filings():
     
     seen = load_seen()
     
-    # Check the 3 most recent filings to catch any fresh drops
     for i in range(min(3, len(forms))):
         latest_form = forms[i]
         latest_date = dates[i]
@@ -47,11 +46,9 @@ def check_sec_filings():
         doc_name = primary_docs[i]
         filing_url = f"https://www.sec.gov/Archives/edgar/data/{int(CIK)}/{acc_no_hyphen}/{doc_name}"
         
-        # Track unique accession number
         if acc_no in seen:
             continue
             
-        # Target 8-K or 6-K material filings
         if latest_form in ["8-K", "6-K"]:
             message = f"🚨 MANE {latest_form} Filed on {latest_date}! Check clinical readout / data: {filing_url}"
             send_ntfy(message)
