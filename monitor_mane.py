@@ -1,72 +1,64 @@
 import os
-import json
 import requests
+from datetime import datetime, timezone, timedelta
 
 # SEC EDGAR API parameters for Veradermics (CIK: 0001827635)
 CIK = "0001827635"
 HEADERS = {
     "User-Agent": "LinaLahoz nivalis@capital.com"
 }
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "lina-mane-cat-alerts")
-CACHE_FILE = "seen_mane_filings.json"
+NTFY_TOPIC = os.getenv("NTFY_TOPIC")
+EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "schedule")
 
-def load_seen():
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r") as f:
-                return set(json.load(f))
-        except:
-            return set()
-    return set()
-
-def save_seen(seen):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(list(seen), f)
-
-def check_sec_filings():
-    url = f"https://data.sec.gov/submissions/CIK{CIK}.json"
-    response = requests.get(url, headers=HEADERS, timeout=15)
-    if response.status_code != 200:
+def send_ntfy(title, message, priority="urgent"):
+    if not NTFY_TOPIC:
+        print("Error: NTFY_TOPIC secret is not set.")
         return
-    
-    data = response.json()
-    recent = data.get("filings", {}).get("recent", {})
-    forms = recent.get("form", [])
-    dates = recent.get("filingDate", [])
-    accessions = recent.get("accessionNumber", [])
-    primary_docs = recent.get("primaryDocument", [])
-    
-    seen = load_seen()
-    
-    for i in range(min(3, len(forms))):
-        latest_form = forms[i]
-        latest_date = dates[i]
-        acc_no = accessions[i]
-        acc_no_hyphen = acc_no.replace("-", "")
-        doc_name = primary_docs[i]
-        filing_url = f"https://www.sec.gov/Archives/edgar/data/{int(CIK)}/{acc_no_hyphen}/{doc_name}"
-        
-        if acc_no in seen:
-            continue
-            
-        if latest_form in ["8-K", "6-K"]:
-            message = f"🚨 MANE {latest_form} Filed on {latest_date}! Check clinical readout / data: {filing_url}"
-            send_ntfy(message)
-            seen.add(acc_no)
-            
-    save_seen(seen)
-
-def send_ntfy(message):
-    requests.post(
+    resp = requests.post(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=message.encode("utf-8"),
         headers={
-            "Title": "MANE Clinical Readout Alert",
-            "Priority": "urgent",
+            "Title": title,
+            "Priority": priority,
             "Tags": "chart_with_upward_trend,pill"
         },
         timeout=10
     )
+    print(f"ntfy status: {resp.status_code}")
+
+def check_sec_filings():
+    url = f"https://data.sec.gov/submissions/CIK{CIK}.json"
+    response = requests.get(url, headers=HEADERS, timeout=15)
+    response.raise_for_status()
+    
+    recent = response.json().get("filings", {}).get("recent", {})
+    forms = recent.get("form", [])
+    dates = recent.get("filingDate", [])
+    accept_times = recent.get("acceptanceDateTime", [])
+    accessions = recent.get("accessionNumber", [])
+    primary_docs = recent.get("primaryDocument", [])
+
+    # 1. If triggered manually via "Run workflow", always send a test alert with the latest filing
+    if EVENT_NAME == "workflow_dispatch" and forms:
+        acc_clean = accessions[0].replace("-", "")
+        filing_url = f"https://www.sec.gov/Archives/edgar/data/{int(CIK)}/{acc_clean}/{primary_docs[0]}"
+        msg = f"✅ Manual Test OK! Latest MANE filing is {forms[0]} ({dates[0]}): {filing_url}"
+        send_ntfy("MANE Monitor Test", msg, priority="default")
+        return
+
+    # 2. On scheduled 30-min runs, only alert if an 8-K or 6-K was accepted in the last 45 minutes
+    now_utc = datetime.now(timezone.utc)
+    for i in range(min(5, len(forms))):
+        if forms[i] in ["8-K", "8-K/A", "6-K"]:
+            # SEC acceptanceDateTime is formatted like "2026-10-19T11:30:12.000Z"
+            accepted_dt = datetime.fromisoformat(accept_times[i].replace("Z", "+00:00"))
+            age = now_utc - accepted_dt
+            if age <= timedelta(minutes=45):
+                acc_clean = accessions[i].replace("-", "")
+                filing_url = f"https://www.sec.gov/Archives/edgar/data/{int(CIK)}/{acc_clean}/{primary_docs[i]}"
+                msg = f"🚨 NEW MANE {forms[i]} Filed ({dates[i]})! Check readout/news: {filing_url}"
+                send_ntfy("MANE Clinical Readout Alert", msg, priority="urgent")
+                break
 
 if __name__ == "__main__":
     check_sec_filings()
